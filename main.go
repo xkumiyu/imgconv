@@ -3,12 +3,12 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"image"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 )
@@ -24,18 +24,33 @@ func init() {
 }
 
 func main() {
-	parse()
+	if err := parse(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
 	outFormat, err := ext2format(filepath.Ext(outFile))
 	if err != nil {
-		// Consider error output
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
 	}
-	convert(inFile, outFile, outFormat)
+
+	if err := convert(inFile, outFile, outFormat); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
 }
 
-func parse() {
+func parse() error {
 	flag.Parse()
-	// TODO: check required options
+
+	if inFile == "" {
+		return errors.New("'-i' is required")
+	}
+	if outFile == "" {
+		return errors.New("'-o' is required")
+	}
+	return nil
 }
 
 func ext2format(ext string) (string, error) {
@@ -47,50 +62,47 @@ func ext2format(ext string) (string, error) {
 	case ".gif":
 		return "gif", nil
 	default:
-		return "", errors.New("error: invalid file extension")
+		return "", fmt.Errorf("invalid file extension: %s", ext)
 	}
 }
 
-func convert(src string, dst string, format string) {
+func convert(src string, dst string, format string) error {
 	sf, err := os.Open(src)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer sf.Close()
 
 	img, _, err := image.Decode(sf)
+	if err != nil {
+		return err
+	}
 
 	df, err := os.Create(dst)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer func() {
-		if err := df.Close(); err != nil {
-			log.Fatal(err)
-		}
-	}()
+	defer df.Close()
 
 	if err := encode(df, img, format); err != nil {
-		// TODO: delete file
-		log.Fatal(err)
+		os.Remove(dst)
+		return err
 	}
+
+	return nil
 }
 
 func encode(w io.Writer, img image.Image, format string) error {
-	var err error
-
 	switch format {
 	case "png":
-		err = png.Encode(w, img)
+		return png.Encode(w, img)
 	case "jpeg":
 		opts := jpeg.Options{Quality: 100}
-		err = jpeg.Encode(w, img, &opts)
+		return jpeg.Encode(w, img, &opts)
 	case "gif":
 		opts := gif.Options{}
-		err = gif.Encode(w, img, &opts)
+		return gif.Encode(w, img, &opts)
 	default:
-		err = errors.New("error: invalid format")
+		return fmt.Errorf("invalid format: %s", format)
 	}
-
-	return err
 }
